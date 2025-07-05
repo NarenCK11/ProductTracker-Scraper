@@ -1,16 +1,30 @@
-# scraper
+# Product Monitor App
 
-A new Flutter project.
+![App Screenshot](screenshots/main.png) <!-- Add a screenshot if available -->
 
-## Getting Started
+A Flutter application that tracks product availability and price changes on e-commerce websites like Amazon and Flipkart.
 
-This project is a starting point for a Flutter application.
+## Features
 
-A few resources to get you started if this is your first Flutter project:
+- ✅ Real-time product availability monitoring
+- 🔔 Instant notifications when products come in stock
+- ⏲️ Customizable check intervals (15min+ recommended)
+- 🔄 Background monitoring capability
+- 📊 Supports Amazon and Flipkart
+- 🔐 Secure ScraperAPI integration
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Installation
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Requirements
+
+- Flutter SDK (v3.0.0 or higher)
+- Dart (v2.17.0 or higher)
+- Android/iOS device or emulator
+- [ScraperAPI](https://www.scraperapi.com/) account
+
+### Steps
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/product-monitor.git
+   cd product-monitor
