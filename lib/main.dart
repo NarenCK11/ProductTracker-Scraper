@@ -10,10 +10,16 @@ import 'package:intl/intl.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'product_utils.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:lottie/lottie.dart';
+import 'package:confetti/confetti.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:badges/badges.dart' as badges;
+import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   initializeService();
   runApp(MyApp());
 }
@@ -38,34 +44,63 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Product Monitor',
+      title: 'NK Product Tracker',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: MaterialColor(0xFF6B46C1, {
-          50: Color(0xFFF5F3FF),
-          100: Color(0xFFEDE9FE),
-          200: Color(0xFFDDD6FE),
-          300: Color(0xFFC4B5FD),
-          400: Color(0xFFA78BFA),
-          500: Color(0xFF8B5CF6),
-          600: Color(0xFF7C3AED),
-          700: Color(0xFF6B46C1),
-          800: Color(0xFF553C9A),
-          900: Color(0xFF4C1D95),
-        }),
+        primarySwatch: createMaterialColor(Color(0xFF6B46C1)),
+        scaffoldBackgroundColor: Color(0xFFF8F9FA),
         visualDensity: VisualDensity.adaptivePlatformDensity,
         appBarTheme: AppBarTheme(
           backgroundColor: Color(0xFF6B46C1),
-          foregroundColor: Colors.white,
           elevation: 0,
+          centerTitle: true,
+          iconTheme: IconThemeData(color: Colors.white),
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        cardTheme: CardTheme(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         ),
         floatingActionButtonTheme: FloatingActionButtonThemeData(
           backgroundColor: Color(0xFF6B46C1),
-          foregroundColor: Colors.white,
+          elevation: 4,
+        ),
+        dividerTheme: DividerThemeData(
+          space: 0,
+          thickness: 1,
+          color: Colors.grey[200],
         ),
       ),
       home: ProductMonitorHome(),
     );
   }
+}
+
+MaterialColor createMaterialColor(Color color) {
+  List strengths = <double>[.05];
+  Map<int, Color> swatch = {};
+  final int r = color.red, g = color.green, b = color.blue;
+
+  for (int i = 1; i < 10; i++) {
+    strengths.add(0.1 * i);
+  }
+  strengths.forEach((strength) {
+    final double ds = 0.5 - strength;
+    swatch[(strength * 1000).round()] = Color.fromRGBO(
+      r + ((ds < 0 ? r : (255 - r)) * ds).round(),
+      g + ((ds < 0 ? g : (255 - g)) * ds).round(),
+      b + ((ds < 0 ? b : (255 - b)) * ds).round(),
+      1,
+    );
+  });
+  return MaterialColor(color.value, swatch);
 }
 
 class Product {
@@ -76,6 +111,13 @@ class Product {
   final String availability;
   final DateTime lastChecked;
   final bool isAvailable;
+  final bool trackAvailability;
+  final bool trackPrice;
+  final String initialPrice;
+  final List<PriceHistory> priceHistory;
+  final String? imageUrl;
+  final String currency;
+  final String domain;
 
   Product({
     required this.id,
@@ -85,6 +127,13 @@ class Product {
     required this.availability,
     required this.lastChecked,
     required this.isAvailable,
+    this.trackAvailability = true,
+    this.trackPrice = false,
+    this.initialPrice = '',
+    this.priceHistory = const [],
+    this.imageUrl,
+    this.currency = '₹',
+    this.domain = '',
   });
 
   Map<String, dynamic> toJson() {
@@ -96,6 +145,13 @@ class Product {
       'availability': availability,
       'lastChecked': lastChecked.toIso8601String(),
       'isAvailable': isAvailable,
+      'trackAvailability': trackAvailability,
+      'trackPrice': trackPrice,
+      'initialPrice': initialPrice,
+      'priceHistory': priceHistory.map((h) => h.toJson()).toList(),
+      'imageUrl': imageUrl,
+      'currency': currency,
+      'domain': domain,
     };
   }
 
@@ -108,6 +164,74 @@ class Product {
       availability: json['availability'],
       lastChecked: DateTime.parse(json['lastChecked']),
       isAvailable: json['isAvailable'],
+      trackAvailability: json['trackAvailability'] ?? true,
+      trackPrice: json['trackPrice'] ?? false,
+      initialPrice: json['initialPrice'] ?? json['price'] ?? '',
+      priceHistory: (json['priceHistory'] as List<dynamic>?)
+          ?.map((h) => PriceHistory.fromJson(h))
+          .toList() ?? [],
+      imageUrl: json['imageUrl'],
+      currency: json['currency'] ?? '₹',
+      domain: json['domain'] ?? '',
+    );
+  }
+
+  Product copyWith({
+    String? price,
+    String? availability,
+    DateTime? lastChecked,
+    bool? isAvailable,
+    bool? trackAvailability,
+    bool? trackPrice,
+    String? initialPrice,
+    List<PriceHistory>? priceHistory,
+    String? imageUrl,
+    String? currency,
+    String? domain,
+  }) {
+    return Product(
+      id: id,
+      url: url,
+      title: title,
+      price: price ?? this.price,
+      availability: availability ?? this.availability,
+      lastChecked: lastChecked ?? this.lastChecked,
+      isAvailable: isAvailable ?? this.isAvailable,
+      trackAvailability: trackAvailability ?? this.trackAvailability,
+      trackPrice: trackPrice ?? this.trackPrice,
+      initialPrice: initialPrice ?? this.initialPrice,
+      priceHistory: priceHistory ?? this.priceHistory,
+      imageUrl: imageUrl ?? this.imageUrl,
+      currency: currency ?? this.currency,
+      domain: domain ?? this.domain,
+    );
+  }
+}
+
+class PriceHistory {
+  final DateTime date;
+  final String price;
+  final bool wasAvailable;
+
+  PriceHistory({
+    required this.date,
+    required this.price,
+    this.wasAvailable = true,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'date': date.toIso8601String(),
+      'price': price,
+      'wasAvailable': wasAvailable,
+    };
+  }
+
+  factory PriceHistory.fromJson(Map<String, dynamic> json) {
+    return PriceHistory(
+      date: DateTime.parse(json['date']),
+      price: json['price'],
+      wasAvailable: json['wasAvailable'] ?? true,
     );
   }
 }
@@ -117,7 +241,7 @@ class ProductMonitorHome extends StatefulWidget {
   _ProductMonitorHomeState createState() => _ProductMonitorHomeState();
 }
 
-class _ProductMonitorHomeState extends State<ProductMonitorHome> {
+class _ProductMonitorHomeState extends State<ProductMonitorHome> with SingleTickerProviderStateMixin {
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
   
@@ -128,10 +252,16 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
   bool isMonitoring = false;
   bool isLoading = false;
   bool backgroundMonitoring = false;
+  late TabController _tabController;
+  late ConfettiController _confettiController;
+  bool _showConfetti = false;
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _confettiController = ConfettiController(duration: const Duration(seconds: 3));
     initializeNotifications();
     requestPermissions();
     loadSettings();
@@ -141,6 +271,8 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
   @override
   void dispose() {
     monitoringTimer?.cancel();
+    _tabController.dispose();
+    _confettiController.dispose();
     super.dispose();
   }
 
@@ -159,7 +291,9 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     await flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) async {
-        print('Notification tapped: ${response.payload}');
+        if (response.payload != null) {
+          await launchUrl(Uri.parse(response.payload!));
+        }
       },
     );
 
@@ -168,22 +302,13 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
       'Product Monitor',
       description: 'Notifications for product availability',
       importance: Importance.high,
-    );
-
-    const AndroidNotificationChannel bgChannel = AndroidNotificationChannel(
-      'product_monitor_bg',
-      'Product Monitor Background',
-      description: 'Background notifications for product availability',
-      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
     );
 
     await flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
-
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(bgChannel);
   }
 
   Future<void> loadSettings() async {
@@ -203,12 +328,18 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
   }
 
   Future<void> loadProducts() async {
+    setState(() {
+      isLoading = true;
+    });
+    
     final prefs = await SharedPreferences.getInstance();
     final productsJson = prefs.getStringList('products') ?? [];
+    
     setState(() {
       products = productsJson
           .map((json) => Product.fromJson(jsonDecode(json)))
           .toList();
+      isLoading = false;
     });
   }
 
@@ -232,6 +363,7 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
       enableVibration: true,
       playSound: true,
       icon: '@mipmap/ic_launcher',
+      color: Color(0xFF6B46C1),
     );
     
     const NotificationDetails platformChannelSpecifics =
@@ -248,9 +380,10 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
 
   Future<Product?> checkProductAvailability(String url) async {
     try {
-      print("Checking product: $url");
-      print("API Key: ${scraperApiKey.isNotEmpty ? 'Set' : 'Not Set'}");
-      
+      if (scraperApiKey.isEmpty) {
+        throw Exception('API key not set');
+      }
+
       final response = await http.get(
         Uri.parse('https://api.scraperapi.com').replace(queryParameters: {
           'api_key': scraperApiKey,
@@ -264,8 +397,6 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
         },
       ).timeout(Duration(seconds: 60));
 
-      print("Response status: ${response.statusCode}");
-
       if (response.statusCode == 200) {
         final document = html_parser.parse(response.body);
         
@@ -273,18 +404,66 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
         String price = "Price Not Found";
         String availability = "In Stock";
         bool isAvailable = true;
+        String? imageUrl;
+        String currency = '₹';
+        String domain = Uri.parse(url).host;
 
-        if (url.contains('flipkart.com')) {
-          title = ProductUtils.extractFlipkartTitle(document) ?? title;
-          price = ProductUtils.extractFlipkartPrice(document) ?? price;
-          availability = ProductUtils.extractFlipkartAvailability(document);
-        } else if (url.contains('amazon.')) {
-          title = ProductUtils.extractAmazonTitle(document) ?? title;
-          price = ProductUtils.extractAmazonPrice(document) ?? price;
-          availability = ProductUtils.extractAmazonAvailability(document);
+        // Extract common elements
+        final priceElement = document.querySelector('[class*="price"]');
+        if (priceElement != null) {
+          price = priceElement.text.trim();
+          if (price.contains('₹')) {
+            currency = '₹';
+          } else if (price.contains('\$')) {
+            currency = '\$';
+          } else if (price.contains('€')) {
+            currency = '€';
+          } else if (price.contains('£')) {
+            currency = '£';
+          }
         }
 
-        isAvailable = !availability.toLowerCase().contains('out of stock');
+        // Amazon specific extraction
+        if (domain.contains('amazon.')) {
+          title = document.querySelector('#productTitle')?.text.trim() ?? title;
+          price = document.querySelector('.a-price-whole')?.text.trim() ?? price;
+          availability = document.querySelector('#availability')?.text.trim() ?? availability;
+          imageUrl = document.querySelector('#landingImage')?.attributes['src'];
+        } 
+        // Flipkart specific extraction
+        else if (domain.contains('flipkart.com')) {
+          title = document.querySelector('.B_NuCI')?.text.trim() ?? title;
+          price = document.querySelector('._30jeq3')?.text.trim() ?? price;
+          availability = document.querySelector('._16FRp0')?.text.trim() ?? "Available";
+          imageUrl = document.querySelector('._396cs4')?.attributes['src'];
+        }
+        // Myntra specific extraction
+        else if (domain.contains('myntra.com')) {
+          title = document.querySelector('.pdp-title')?.text.trim() ?? title;
+          price = document.querySelector('.pdp-price')?.text.trim() ?? price;
+          availability = document.querySelector('.size-buttons-unified-size') != null 
+              ? "Available" 
+              : "Out of Stock";
+          imageUrl = document.querySelector('.image-grid-image')?.attributes['src'];
+        }
+        // Ajio specific extraction
+        else if (domain.contains('ajio.com')) {
+          title = document.querySelector('.prod-name')?.text.trim() ?? title;
+          price = document.querySelector('.prod-sp')?.text.trim() ?? price;
+          availability = document.querySelector('.edd-pincode-msg-details')?.text.trim() ?? "Available";
+          imageUrl = document.querySelector('.img-container img')?.attributes['src'];
+        }
+        // Generic extraction as fallback
+        else {
+          title = document.querySelector('h1')?.text.trim() ?? title;
+          price = document.querySelector('[itemprop="price"]')?.text.trim() ?? price;
+          availability = document.querySelector('[itemprop="availability"]')?.text.trim() ?? availability;
+          imageUrl = document.querySelector('img[itemprop="image"]')?.attributes['src'];
+        }
+
+        isAvailable = !availability.toLowerCase().contains('out of stock') && 
+                     !availability.toLowerCase().contains('unavailable') &&
+                     !availability.toLowerCase().contains('sold out');
 
         return Product(
           id: url.hashCode.toString(),
@@ -294,9 +473,14 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
           availability: availability,
           lastChecked: DateTime.now(),
           isAvailable: isAvailable,
+          trackAvailability: true,
+          trackPrice: false,
+          initialPrice: price,
+          imageUrl: imageUrl,
+          currency: currency,
+          domain: domain,
         );
       } else {
-        print("HTTP Error: ${response.statusCode}");
         if (response.statusCode == 401) {
           throw Exception('Invalid API key');
         } else if (response.statusCode == 429) {
@@ -313,15 +497,38 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
 
   void startMonitoring() {
     if (scraperApiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please set your ScraperAPI key first')),
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('API Key Required'),
+          content: Text('Please set your ScraperAPI key in settings to start monitoring.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showSettingsDialog();
+              },
+              child: Text('Settings'),
+            ),
+          ],
+        ),
       );
       return;
     }
 
     if (products.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please add at least one product to monitor')),
+        SnackBar(
+          content: Text('Please add at least one product to monitor'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
       );
       return;
     }
@@ -344,7 +551,13 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Monitoring started - checking every $checkInterval minutes')),
+      SnackBar(
+        content: Text('Monitoring started - checking every $checkInterval minutes'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
     );
   }
 
@@ -372,7 +585,13 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Monitoring stopped')),
+      SnackBar(
+        content: Text('Monitoring stopped'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
     );
   }
 
@@ -386,33 +605,99 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
   }
 
   Future<void> checkAllProducts() async {
+    bool hasAvailabilityChanges = false;
+    bool hasPriceChanges = false;
+    
     for (int i = 0; i < products.length; i++) {
       try {
-        final updatedProduct = await checkProductAvailability(products[i].url);
+        Product? updatedProduct = await checkProductAvailability(products[i].url);
         if (updatedProduct != null) {
-          final wasUnavailable = !products[i].isAvailable;
-          final isNowAvailable = updatedProduct.isAvailable;
+          bool shouldNotify = false;
+          String notificationTitle = '';
+          String notificationBody = '';
+          Product productToUpdate = updatedProduct.copyWith(
+            trackAvailability: products[i].trackAvailability,
+            trackPrice: products[i].trackPrice,
+            initialPrice: products[i].initialPrice.isEmpty ? updatedProduct.price : products[i].initialPrice,
+            priceHistory: products[i].priceHistory,
+          );
+
+          // Check for availability changes if tracking is enabled
+          if (products[i].trackAvailability) {
+            final wasUnavailable = !products[i].isAvailable;
+            final isNowAvailable = updatedProduct.isAvailable;
+
+            if (wasUnavailable && isNowAvailable) {
+              shouldNotify = true;
+              hasAvailabilityChanges = true;
+              notificationTitle = '🎉 Product Available!';
+              notificationBody = '${updatedProduct.title} is now in stock!';
+            }
+          }
+
+          // Check for price changes if tracking is enabled
+          if (products[i].trackPrice) {
+            final oldPrice = products[i].price;
+            final newPrice = updatedProduct.price;
+            final initialPrice = products[i].initialPrice.isEmpty ? newPrice : products[i].initialPrice;
+
+            if (oldPrice != newPrice) {
+              shouldNotify = true;
+              hasPriceChanges = true;
+              notificationTitle = '💰 Price Changed!';
+              notificationBody = '${updatedProduct.title} price changed from $oldPrice to $newPrice';
+
+              // Update price history
+              final newPriceHistory = List<PriceHistory>.from(products[i].priceHistory)
+                ..add(PriceHistory(
+                  date: DateTime.now(),
+                  price: newPrice,
+                  wasAvailable: updatedProduct.isAvailable,
+                ));
+
+              productToUpdate = productToUpdate.copyWith(
+                priceHistory: newPriceHistory,
+                initialPrice: initialPrice,
+              );
+            }
+          }
 
           setState(() {
-            products[i] = updatedProduct;
+            products[i] = productToUpdate.copyWith(
+              lastChecked: DateTime.now(),
+            );
           });
 
-          if (wasUnavailable && isNowAvailable) {
+          if (shouldNotify) {
             await showNotification(
-              '🎉 Product Available!',
-              '${updatedProduct.title} is now in stock!',
+              notificationTitle,
+              notificationBody,
               payload: updatedProduct.url,
             );
           }
         }
+        
+        // Add delay between requests
+        await Future.delayed(Duration(seconds: 5));
       } catch (e) {
         print('Error checking product ${products[i].title}: $e');
       }
-      
-      // Add delay between requests
-      await Future.delayed(Duration(seconds: 5));
     }
+    
     await saveProducts();
+    
+    // Show confetti if there were positive changes
+    if (hasAvailabilityChanges || hasPriceChanges) {
+      setState(() {
+        _showConfetti = true;
+      });
+      _confettiController.play();
+      Future.delayed(Duration(seconds: 5), () {
+        setState(() {
+          _showConfetti = false;
+        });
+      });
+    }
   }
 
   Future<void> checkSingleProduct(int index) async {
@@ -424,17 +709,34 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
       final updatedProduct = await checkProductAvailability(products[index].url);
       if (updatedProduct != null) {
         setState(() {
-          products[index] = updatedProduct;
+          products[index] = updatedProduct.copyWith(
+            trackAvailability: products[index].trackAvailability,
+            trackPrice: products[index].trackPrice,
+            initialPrice: products[index].initialPrice.isEmpty ? updatedProduct.price : products[index].initialPrice,
+            priceHistory: products[index].priceHistory,
+          );
         });
         await saveProducts();
         
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Product updated successfully')),
+          SnackBar(
+            content: Text('Product updated successfully'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update product: $e')),
+        SnackBar(
+          content: Text('Failed to update product: ${e.toString()}'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
       );
     }
 
@@ -443,7 +745,7 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     });
   }
 
-  void addProduct(String url) async {
+  Future<void> addProduct(String url, {bool trackAvailability = true, bool trackPrice = false}) async {
     if (url.isEmpty) return;
 
     setState(() {
@@ -454,23 +756,60 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
       final product = await checkProductAvailability(url);
       if (product != null) {
         setState(() {
-          products.add(product);
+          products.add(Product(
+            id: product.id,
+            url: product.url,
+            title: product.title,
+            price: product.price,
+            availability: product.availability,
+            lastChecked: product.lastChecked,
+            isAvailable: product.isAvailable,
+            trackAvailability: trackAvailability,
+            trackPrice: trackPrice,
+            initialPrice: product.price,
+            priceHistory: [],
+            imageUrl: product.imageUrl,
+            currency: product.currency,
+            domain: product.domain,
+          ));
         });
         await saveProducts();
         
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Product added successfully')),
+          SnackBar(
+            content: Text('Product added successfully'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add product: $e')),
+        SnackBar(
+          content: Text('Failed to add product: ${e.toString()}'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
       );
     }
 
     setState(() {
       isLoading = false;
     });
+  }
+
+  void updateProductTracking(int index, bool trackAvailability, bool trackPrice) async {
+    setState(() {
+      products[index] = products[index].copyWith(
+        trackAvailability: trackAvailability,
+        trackPrice: trackPrice,
+      );
+    });
+    await saveProducts();
   }
 
   void removeProduct(String id) {
@@ -480,14 +819,382 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     saveProducts();
   }
 
+  void _showTrackingOptionsDialog(int index) {
+    bool trackAvailability = products[index].trackAvailability;
+    bool trackPrice = products[index].trackPrice;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Tracking Options'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: Text('Track Availability'),
+                  value: trackAvailability,
+                  onChanged: (value) {
+                    setState(() {
+                      trackAvailability = value;
+                    });
+                  },
+                  activeColor: Color(0xFF6B46C1),
+                ),
+                SwitchListTile(
+                  title: Text('Track Price Changes'),
+                  value: trackPrice,
+                  onChanged: (value) {
+                    setState(() {
+                      trackPrice = value;
+                    });
+                  },
+                  activeColor: Color(0xFF6B46C1),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              TextButton(
+                onPressed: () {
+                  updateProductTracking(index, trackAvailability, trackPrice);
+                  Navigator.of(context).pop();
+                },
+                child: Text('Save', style: TextStyle(color: Color(0xFF6B46C1))),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showPriceHistoryDialog(int index) {
+    final product = products[index];
+    final priceHistory = product.priceHistory;
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                'Price History',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF6B46C1),
+                ),
+              ),
+            ),
+            Divider(height: 0),
+            Container(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
+              width: double.maxFinite,
+              child: priceHistory.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.history, size: 48, color: Colors.grey),
+                            SizedBox(height: 16),
+                            Text(
+                              'No price history available',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: priceHistory.length,
+                      itemBuilder: (context, i) {
+                        final history = priceHistory[i];
+                        return ListTile(
+                          title: Text(
+                            '${product.currency}${history.price}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: history.wasAvailable ? Colors.black : Colors.grey),
+                          ),
+                          subtitle: Text(
+                            DateFormat('MMM dd, yyyy - HH:mm').format(history.date),
+                            style: TextStyle(
+                              color: history.wasAvailable ? Colors.grey : Colors.red),
+                          ),
+                          leading: Icon(
+                            Icons.circle,
+                            size: 12,
+                            color: history.wasAvailable ? Colors.green : Colors.red,
+                          ),
+                          trailing: i == 0
+                              ? badges.Badge(
+                                  badgeStyle: badges.BadgeStyle(
+                                    badgeColor: Color(0xFF6B46C1),
+                                  ),
+                                  badgeContent: Text(
+                                    'Current',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10),
+                                  ),
+                                )
+                              : null,
+                        );
+                      },
+                    ),
+            ),
+            Divider(height: 0),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('Close', style: TextStyle(color: Color(0xFF6B46C1))),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showProductDetails(int index) {
+    final product = products[index];
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              height: 250,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+                color: Colors.grey[100],
+              ),
+              child: Stack(
+                children: [
+                  if (product.imageUrl != null)
+                    Center(
+                      child: Image.network(
+                        product.imageUrl!,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded / 
+                                    loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) => Icon(
+                          Icons.shopping_bag,
+                          size: 100,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    )
+                  else
+                    Center(
+                      child: Icon(
+                        Icons.shopping_bag,
+                        size: 100,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  Positioned(
+                    top: 16,
+                    right: 16,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: product.isAvailable ? Colors.green : Colors.red,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        product.isAvailable ? 'Available' : 'Out of Stock',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.title,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        '${product.currency}${product.price}',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF6B46C1)),
+                      ),
+                      Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.open_in_new),
+                        onPressed: () => launchUrl(Uri.parse(product.url)),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Icon(Icons.store, size: 20, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text(
+                        product.domain.replaceAll('www.', ''),
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time, size: 20, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text(
+                        'Last checked: ${DateFormat('MMM dd, yyyy - HH:mm').format(product.lastChecked)}',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 16),
+                  if (product.trackPrice && product.priceHistory.isNotEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Price History',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 8),
+                        Container(
+                          height: 100,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: product.priceHistory.length,
+                            itemBuilder: (context, i) {
+                              final history = product.priceHistory[i];
+                              return Container(
+                                width: 120,
+                                margin: EdgeInsets.only(right: 8),
+                                padding: EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.grey[200]!),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      '${product.currency}${history.price}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: history.wasAvailable 
+                                            ? Colors.black 
+                                            : Colors.grey),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      DateFormat('MMM dd').format(history.date),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: history.wasAvailable 
+                                            ? Colors.grey 
+                                            : Colors.red),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Product Monitor'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'NK',
+                style: TextStyle(
+                  color: Color(0xFF6B46C1),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            SizedBox(width: 8),
+            Text('Product Tracker'),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh),
+            icon: badges.Badge(
+              showBadge: products.any((p) => !p.isAvailable && p.trackAvailability),
+              badgeStyle: badges.BadgeStyle(
+                badgeColor: Colors.red,
+              ),
+              child: Icon(Icons.notifications_active),
+            ),
             onPressed: isLoading ? null : () async {
               await checkAllProducts();
             },
@@ -498,220 +1205,369 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Container(
-            margin: EdgeInsets.all(16),
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Color(0xFFF5F3FF),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Color(0xFF6B46C1).withOpacity(0.3)),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Monitoring Status',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF6B46C1),
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            isMonitoring 
-                                ? 'Active - Checking every $checkInterval minutes' 
-                                : 'Stopped',
-                            style: TextStyle(
-                              color: isMonitoring ? Colors.green : Colors.grey,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (products.isNotEmpty)
-                            Text(
-                              'Monitoring ${products.length} product${products.length > 1 ? 's' : ''}',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    ElevatedButton(
-                      onPressed: isMonitoring ? stopMonitoring : startMonitoring,
-                      child: Text(isMonitoring ? 'Stop' : 'Start'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isMonitoring ? Colors.red : Color(0xFF6B46C1),
-                        foregroundColor: Colors.white,
-                      ),
+          Column(
+            children: [
+              Container(
+                margin: EdgeInsets.all(16),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF6B46C1), Color(0xFF9F7AEA)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.purple.withOpacity(0.2),
+                      blurRadius: 10,
+                      offset: Offset(0, 5),
                     ),
                   ],
                 ),
-                if (backgroundMonitoring) ...[
-                  SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(Icons.cloud_sync, size: 16, color: Colors.green),
-                      SizedBox(width: 4),
-                      Text(
-                        'Background monitoring enabled',
-                        style: TextStyle(
-                          color: Colors.green,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (isLoading)
-            Padding(
-              padding: EdgeInsets.all(16.0),
-              child: LinearProgressIndicator(),
-            ),
-          Expanded(
-            child: products.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Icon(
-                          Icons.shopping_cart_outlined,
-                          size: 80,
-                          color: Colors.grey,
-                        ),
-                        SizedBox(height: 16),
-                        Text(
-                          'No products added yet',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Product Tracker',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                isMonitoring 
+                                    ? 'Active - Checking every $checkInterval min' 
+                                    : 'Monitoring is stopped',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Tap the + button to add a product',
-                          style: TextStyle(
-                            color: Colors.grey,
+                        ElevatedButton(
+                          onPressed: isMonitoring ? stopMonitoring : startMonitoring,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Color(0xFF6B46C1),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(isMonitoring ? Icons.stop : Icons.play_arrow, size: 20),
+                              SizedBox(width: 4),
+                              Text(isMonitoring ? 'Stop' : 'Start'),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: products.length,
-                    itemBuilder: (context, index) {
-                      final product = products[index];
-                      return Card(
-                        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: product.isAvailable 
-                                ? Colors.green 
-                                : Colors.red,
-                            child: Icon(
-                              product.isAvailable 
-                                  ? Icons.check 
-                                  : Icons.close,
+                    if (backgroundMonitoring) ...[
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.cloud_sync, size: 16, color: Colors.white),
+                          SizedBox(width: 4),
+                          Text(
+                            'Background monitoring enabled',
+                            style: TextStyle(
                               color: Colors.white,
+                              fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (isLoading)
+                LinearProgressIndicator(
+                  minHeight: 2,
+                  backgroundColor: Colors.transparent,
+                  color: Color(0xFF6B46C1),
+                ),
+              Expanded(
+                child: products.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Lottie.asset(
+                              'assets/shopping.json',
+                              width: 200,
+                              height: 200,
+                              fit: BoxFit.contain,
                             ),
-                          ),
-                          title: Text(
-                            product.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Price: ${product.price}'),
-                              Text('Status: ${product.availability}'),
-                              Text(
-                                'Last checked: ${DateFormat('HH:mm, dd/MM').format(product.lastChecked)}',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.refresh, color: Colors.blue),
-                                onPressed: isLoading ? null : () => checkSingleProduct(index),
-                              ),
-                              IconButton(
-                                icon: Icon(Icons.delete, color: Colors.red),
-                                onPressed: () => removeProduct(product.id),
-                              ),
-                            ],
-                          ),
-                          isThreeLine: true,
+                            SizedBox(height: 16),
+                            Text(
+                              'No products added yet',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Tap the + button to add a product',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ],
                         ),
-                      );
-                    },
-                  ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () async {
+                          await checkAllProducts();
+                        },
+                        color: Color(0xFF6B46C1),
+                        child: ListView.builder(
+                          physics: AlwaysScrollableScrollPhysics(),
+                          itemCount: products.length,
+                          itemBuilder: (context, index) {
+                            final product = products[index];
+                            return GestureDetector(
+                              onTap: () => _showProductDetails(index),
+                              child: AnimatedContainer(
+                                duration: Duration(milliseconds: 300),
+                                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                child: Card(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 80,
+                                          height: 80,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(8),
+                                            color: Colors.grey[100],
+                                          ),
+                                          child: product.imageUrl != null
+                                              ? ClipRRect(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  child: Image.network(
+                                                    product.imageUrl!,
+                                                    fit: BoxFit.contain,
+                                                    loadingBuilder: (context, child, loadingProgress) {
+                                                      if (loadingProgress == null) return child;
+                                                      return Center(
+                                                        child: CircularProgressIndicator(
+                                                          value: loadingProgress.expectedTotalBytes != null
+                                                              ? loadingProgress.cumulativeBytesLoaded / 
+                                                                loadingProgress.expectedTotalBytes!
+                                                              : null,
+                                                        ),
+                                                      );
+                                                    },
+                                                    errorBuilder: (context, error, stackTrace) => Icon(
+                                                      Icons.shopping_bag,
+                                                      size: 40,
+                                                      color: Colors.grey,
+                                                    ),
+                                                  ),
+                                                )
+                                              : Center(
+                                                  child: Icon(
+                                                    Icons.shopping_bag,
+                                                    size: 40,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                        ),
+                                        SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                product.title,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold),
+                                              ),
+                                              SizedBox(height: 4),
+                                              Text(
+                                                '${product.currency}${product.price}',
+                                                style: TextStyle(
+                                                  color: Color(0xFF6B46C1),
+                                                  fontWeight: FontWeight.bold),
+                                              ),
+                                              SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  Container(
+                                                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: product.isAvailable 
+                                                          ? Colors.green.withOpacity(0.1) 
+                                                          : Colors.red.withOpacity(0.1),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      product.isAvailable ? 'In Stock' : 'Out of Stock',
+                                                      style: TextStyle(
+                                                        color: product.isAvailable ? Colors.green : Colors.red,
+                                                        fontSize: 12),
+                                                    ),
+                                                  ),
+                                                  Spacer(),
+                                                  Text(
+                                                    DateFormat('HH:mm').format(product.lastChecked),
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.grey),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
           ),
+          if (_showConfetti)
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConfettiWidget(
+                confettiController: _confettiController,
+                blastDirectionality: BlastDirectionality.explosive,
+                shouldLoop: false,
+                colors: const [
+                  Colors.green,
+                  Colors.blue,
+                  Colors.pink,
+                  Colors.orange,
+                  Colors.purple
+                ],
+              ),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddProductDialog,
         child: Icon(Icons.add),
+        tooltip: 'Add Product',
       ),
     );
   }
 
   void _showAddProductDialog() {
     final TextEditingController urlController = TextEditingController();
+    bool trackAvailability = true;
+    bool trackPrice = false;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add Product'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: urlController,
-              decoration: InputDecoration(
-                labelText: 'Product URL',
-                hintText: 'Enter Flipkart or Amazon product URL',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 3,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            SizedBox(height: 8),
-            Text(
-              'Supported sites: Flipkart, Amazon',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Add Product',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: urlController,
+                    decoration: InputDecoration(
+                      labelText: 'Product URL',
+                      hintText: 'Enter product URL from any shopping site',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.link),
+                    ),
+                    maxLines: 3,
+                  ),
+                  SizedBox(height: 16),
+                  SwitchListTile(
+                    title: Text('Track Availability'),
+                    value: trackAvailability,
+                    onChanged: (value) {
+                      setState(() {
+                        trackAvailability = value;
+                      });
+                    },
+                    activeColor: Color(0xFF6B46C1),
+                  ),
+                  SwitchListTile(
+                    title: Text('Track Price Changes'),
+                    value: trackPrice,
+                    onChanged: (value) {
+                      setState(() {
+                        trackPrice = value;
+                      });
+                    },
+                    activeColor: Color(0xFF6B46C1),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Supported sites: Amazon, Flipkart, Myntra, Ajio and more',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey),
+                  ),
+                  SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: Text('Cancel', style: TextStyle(color: Colors.grey)),
+                      ),
+                      SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () {
+                          addProduct(
+                            urlController.text.trim(),
+                            trackAvailability: trackAvailability,
+                            trackPrice: trackPrice,
+                          );
+                          Navigator.of(context).pop();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color(0xFF6B46C1),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: Text('Add Product'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              addProduct(urlController.text.trim());
-              Navigator.of(context).pop();
-            },
-            child: Text('Add'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -726,70 +1582,96 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Settings'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: apiKeyController,
-                decoration: InputDecoration(
-                  labelText: 'ScraperAPI Key',
-                  hintText: 'Enter your ScraperAPI key',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
-              ),
-              SizedBox(height: 16),
-              TextField(
-                controller: intervalController,
-                decoration: InputDecoration(
-                  labelText: 'Check Interval (minutes)',
-                  hintText: 'Enter check interval in minutes',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.number,
-              ),
-              SizedBox(height: 16),
-              CheckboxListTile(
-                title: Text('Background Monitoring'),
-                subtitle: Text('Keep monitoring when app is closed'),
-                value: tempBackgroundMonitoring,
-                onChanged: (value) {
-                  setDialogState(() {
-                    tempBackgroundMonitoring = value ?? false;
-                  });
-                },
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Minimum recommended interval: 15 minutes for background monitoring',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
+        builder: (context, setDialogState) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel'),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Settings',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: apiKeyController,
+                  decoration: InputDecoration(
+                    labelText: 'ScraperAPI Key',
+                    hintText: 'Enter your ScraperAPI key',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.key),
+                  ),
+                  obscureText: true,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: intervalController,
+                  decoration: InputDecoration(
+                    labelText: 'Check Interval (minutes)',
+                    hintText: 'Enter check interval in minutes',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.timer),
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                ),
+                SizedBox(height: 16),
+                SwitchListTile(
+                  title: Text('Background Monitoring'),
+                  subtitle: Text('Keep monitoring when app is closed'),
+                  value: tempBackgroundMonitoring,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      tempBackgroundMonitoring = value;
+                    });
+                  },
+                  activeColor: Color(0xFF6B46C1),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Minimum recommended interval: 15 minutes',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey),
+                ),
+                SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Text('Cancel', style: TextStyle(color: Colors.grey)),
+                    ),
+                    SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          scraperApiKey = apiKeyController.text.trim();
+                          int newInterval = int.tryParse(intervalController.text) ?? 20;
+                          checkInterval = newInterval < 1 ? 1 : newInterval;
+                          backgroundMonitoring = tempBackgroundMonitoring;
+                        });
+                        saveSettings();
+                        Navigator.of(context).pop();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color(0xFF6B46C1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: Text('Save Settings'),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  scraperApiKey = apiKeyController.text.trim();
-                  int newInterval = int.tryParse(intervalController.text) ?? 20;
-                  checkInterval = newInterval < 1 ? 1 : newInterval;
-                  backgroundMonitoring = tempBackgroundMonitoring;
-                });
-                saveSettings();
-                Navigator.of(context).pop();
-              },
-              child: Text('Save'),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -798,7 +1680,6 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> {
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
-  // Initialize Flutter plugins
   WidgetsFlutterBinding.ensureInitialized();
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -825,7 +1706,6 @@ void onStart(ServiceInstance service) async {
       final checkInterval = event?['checkInterval'] ?? 20;
       
       while (true) {
-        // Check if service should continue running
         if (service is AndroidServiceInstance) {
           final androidService = service as AndroidServiceInstance;
           if (await androidService.isForegroundService() == false) {
@@ -834,48 +1714,87 @@ void onStart(ServiceInstance service) async {
         }
         
         try {
-          // Get stored data
           final prefs = await SharedPreferences.getInstance();
           final apiKey = prefs.getString('scraperApiKey') ?? '';
           final productsJson = prefs.getStringList('products') ?? [];
           
           if (apiKey.isEmpty || productsJson.isEmpty) {
-            print("No API key or products found");
             await Future.delayed(Duration(minutes: checkInterval));
             continue;
           }
 
-          // Parse products
           List<Product> products = productsJson
               .map((json) => Product.fromJson(jsonDecode(json)))
               .toList();
 
-          // Check each product
           bool hasUpdates = false;
           for (int i = 0; i < products.length; i++) {
             final updatedProduct = await _checkProductInBackground(products[i].url, apiKey);
             if (updatedProduct != null) {
-              final wasUnavailable = !products[i].isAvailable;
-              final isNowAvailable = updatedProduct.isAvailable;
-              
-              products[i] = updatedProduct;
+              bool shouldNotify = false;
+              String notificationTitle = '';
+              String notificationBody = '';
+
+              Product productToUpdate = updatedProduct.copyWith(
+                trackAvailability: products[i].trackAvailability,
+                trackPrice: products[i].trackPrice,
+                initialPrice: products[i].initialPrice.isEmpty ? updatedProduct.price : products[i].initialPrice,
+                priceHistory: products[i].priceHistory,
+              );
+
+              if (products[i].trackAvailability) {
+                final wasUnavailable = !products[i].isAvailable;
+                final isNowAvailable = updatedProduct.isAvailable;
+
+                if (wasUnavailable && isNowAvailable) {
+                  shouldNotify = true;
+                  notificationTitle = '🎉 Product Available!';
+                  notificationBody = '${updatedProduct.title} is now in stock!';
+                }
+              }
+
+              if (products[i].trackPrice) {
+                final oldPrice = products[i].price;
+                final newPrice = updatedProduct.price;
+                final initialPrice = products[i].initialPrice.isEmpty ? newPrice : products[i].initialPrice;
+
+                if (oldPrice != newPrice) {
+                  shouldNotify = true;
+                  notificationTitle = '💰 Price Changed!';
+                  notificationBody = '${updatedProduct.title} price changed from $oldPrice to $newPrice';
+
+                  final newPriceHistory = List<PriceHistory>.from(products[i].priceHistory)
+                    ..add(PriceHistory(
+                      date: DateTime.now(),
+                      price: newPrice,
+                      wasAvailable: updatedProduct.isAvailable,
+                    ));
+
+                  productToUpdate = productToUpdate.copyWith(
+                    priceHistory: newPriceHistory,
+                    initialPrice: initialPrice,
+                  );
+                }
+              }
+
+              products[i] = productToUpdate.copyWith(
+                lastChecked: DateTime.now(),
+              );
               hasUpdates = true;
 
-              // Send notification if product became available
-              if (wasUnavailable && isNowAvailable) {
+              if (shouldNotify) {
                 await _showBackgroundNotification(
                   flutterLocalNotificationsPlugin,
-                  '🎉 Product Available!',
-                  '${updatedProduct.title} is now in stock!',
+                  notificationTitle,
+                  notificationBody,
+                  updatedProduct.url,
                 );
               }
             }
             
-            // Add delay between requests to avoid rate limiting
             await Future.delayed(Duration(seconds: 5));
           }
 
-          // Save updated products
           if (hasUpdates) {
             final updatedProductsJson = products
                 .map((product) => jsonEncode(product.toJson()))
@@ -883,7 +1802,6 @@ void onStart(ServiceInstance service) async {
             await prefs.setStringList('products', updatedProductsJson);
           }
 
-          // Wait until next check
           await Future.delayed(Duration(minutes: checkInterval));
         } catch (e) {
           print("Background task error: $e");
@@ -896,8 +1814,6 @@ void onStart(ServiceInstance service) async {
 
 Future<Product?> _checkProductInBackground(String url, String apiKey) async {
   try {
-    print("Checking product: $url");
-    
     final response = await http.get(
       Uri.parse('https://api.scraperapi.com').replace(queryParameters: {
         'api_key': apiKey,
@@ -911,8 +1827,6 @@ Future<Product?> _checkProductInBackground(String url, String apiKey) async {
       },
     ).timeout(Duration(seconds: 60));
 
-    print("Response status: ${response.statusCode}");
-
     if (response.statusCode == 200) {
       final document = html_parser.parse(response.body);
       
@@ -920,18 +1834,30 @@ Future<Product?> _checkProductInBackground(String url, String apiKey) async {
       String price = "Price Not Found";
       String availability = "In Stock";
       bool isAvailable = true;
+      String domain = Uri.parse(url).host;
 
-      if (url.contains('flipkart.com')) {
-    title = ProductUtils.extractFlipkartTitle(document) ?? title;
-    price = ProductUtils.extractFlipkartPrice(document) ?? price;
-    availability = ProductUtils.extractFlipkartAvailability(document);
-} else if (url.contains('amazon.')) {
-    title = ProductUtils.extractAmazonTitle(document) ?? title;
-    price = ProductUtils.extractAmazonPrice(document) ?? price;
-    availability = ProductUtils.extractAmazonAvailability(document);
-}
+      // Amazon specific extraction
+      if (domain.contains('amazon.')) {
+        title = document.querySelector('#productTitle')?.text.trim() ?? title;
+        price = document.querySelector('.a-price-whole')?.text.trim() ?? price;
+        availability = document.querySelector('#availability')?.text.trim() ?? availability;
+      } 
+      // Flipkart specific extraction
+      else if (domain.contains('flipkart.com')) {
+        title = document.querySelector('.B_NuCI')?.text.trim() ?? title;
+        price = document.querySelector('._30jeq3')?.text.trim() ?? price;
+        availability = document.querySelector('._16FRp0')?.text.trim() ?? "Available";
+      }
+      // Generic extraction as fallback
+      else {
+        title = document.querySelector('h1')?.text.trim() ?? title;
+        price = document.querySelector('[itemprop="price"]')?.text.trim() ?? price;
+        availability = document.querySelector('[itemprop="availability"]')?.text.trim() ?? availability;
+      }
 
-      isAvailable = !availability.toLowerCase().contains('out of stock');
+      isAvailable = !availability.toLowerCase().contains('out of stock') && 
+                   !availability.toLowerCase().contains('unavailable') &&
+                   !availability.toLowerCase().contains('sold out');
 
       return Product(
         id: url.hashCode.toString(),
@@ -941,9 +1867,11 @@ Future<Product?> _checkProductInBackground(String url, String apiKey) async {
         availability: availability,
         lastChecked: DateTime.now(),
         isAvailable: isAvailable,
+        trackAvailability: true,
+        trackPrice: false,
+        initialPrice: price,
+        domain: domain,
       );
-    } else {
-      print("HTTP Error: ${response.statusCode} - ${response.body}");
     }
   } catch (e) {
     print('Error checking product in background: $e');
@@ -955,6 +1883,7 @@ Future<void> _showBackgroundNotification(
   FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin,
   String title, 
   String body,
+  String url,
 ) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
       AndroidNotificationDetails(
@@ -967,6 +1896,7 @@ Future<void> _showBackgroundNotification(
     enableVibration: true,
     playSound: true,
     icon: '@mipmap/ic_launcher',
+    color: Color(0xFF6B46C1),
   );
   
   const NotificationDetails platformChannelSpecifics =
@@ -977,5 +1907,6 @@ Future<void> _showBackgroundNotification(
     title,
     body,
     platformChannelSpecifics,
+    payload: url,
   );
 }
