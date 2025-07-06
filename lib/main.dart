@@ -379,121 +379,157 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> with SingleTick
   }
 
   Future<Product?> checkProductAvailability(String url) async {
-    try {
-      if (scraperApiKey.isEmpty) {
-        throw Exception('API key not set');
-      }
+  try {
+    if (scraperApiKey.isEmpty) {
+      throw Exception('API key not set');
+    }
 
-      final response = await http.get(
-        Uri.parse('https://api.scraperapi.com').replace(queryParameters: {
-          'api_key': scraperApiKey,
-          'url': url,
-          'country_code': 'in',
-          'render': 'true',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      ).timeout(Duration(seconds: 60));
+    final response = await http.get(
+      Uri.parse('https://api.scraperapi.com').replace(queryParameters: {
+        'api_key': scraperApiKey,
+        'url': url,
+        'country_code': 'in',
+        'render': 'true',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    ).timeout(Duration(seconds: 60));
 
-      if (response.statusCode == 200) {
-        final document = html_parser.parse(response.body);
+    if (response.statusCode == 200) {
+      final document = html_parser.parse(response.body);
+      
+      String title = "Product Not Found";
+      String price = "Price Not Found";
+      String availability = "In Stock";
+      bool isAvailable = true;
+      String? imageUrl;
+      String currency = '₹';
+      String domain = Uri.parse(url).host;
+
+      // Enhanced price extraction function
+      String? extractPrice() {
+        // Try to find price using multiple strategies
+        final pricePattern = RegExp(r'(\d+[\.,]?\d*[\.,]?\d*)');
         
-        String title = "Product Not Found";
-        String price = "Price Not Found";
-        String availability = "In Stock";
-        bool isAvailable = true;
-        String? imageUrl;
-        String currency = '₹';
-        String domain = Uri.parse(url).host;
+        // Common price selectors across multiple sites
+        List<String> priceSelectors = [
+          // Amazon
+          '.a-price-whole', 
+          '.priceToPay span',
+          '.a-offscreen',
+          // Flipkart
+          '._30jeq3',
+          '._16Jk6d',
+          // Myntra
+          '.pdp-price',
+          // Ajio
+          '.prod-sp',
+          // Generic
+          '[itemprop="price"]',
+          '.price',
+          '.current-price',
+          '.price-number',
+          '.final-price'
+        ];
 
-        // Extract common elements
-        final priceElement = document.querySelector('[class*="price"]');
-        if (priceElement != null) {
-          price = priceElement.text.trim();
-          if (price.contains('₹')) {
-            currency = '₹';
-          } else if (price.contains('\$')) {
-            currency = '\$';
-          } else if (price.contains('€')) {
-            currency = '€';
-          } else if (price.contains('£')) {
-            currency = '£';
+        // Try each selector until we find a price
+        for (var selector in priceSelectors) {
+          final element = document.querySelector(selector);
+          if (element != null) {
+            String priceText = element.text.trim();
+            
+            // Try to extract numeric price from the text
+            final match = pricePattern.firstMatch(priceText);
+            if (match != null) {
+              // Clean the price string
+              String cleanPrice = match.group(1)!
+                .replaceAll(',', '') // Remove thousands separators
+                .replaceAll(RegExp(r'[^0-9.]'), ''); // Remove non-numeric except decimal point
+              
+              // Format as currency (assuming Indian Rupees)
+              try {
+                double priceValue = double.parse(cleanPrice);
+                return priceValue.toStringAsFixed(2);
+              } catch (e) {
+                print('Error parsing price: $e');
+              }
+            }
           }
         }
-
-        // Amazon specific extraction
-        if (domain.contains('amazon.')) {
-          title = document.querySelector('#productTitle')?.text.trim() ?? title;
-          price = document.querySelector('.a-price-whole')?.text.trim() ?? price;
-          availability = document.querySelector('#availability')?.text.trim() ?? availability;
-          imageUrl = document.querySelector('#landingImage')?.attributes['src'];
-        } 
-        // Flipkart specific extraction
-        else if (domain.contains('flipkart.com')) {
-          title = document.querySelector('.B_NuCI')?.text.trim() ?? title;
-          price = document.querySelector('._30jeq3')?.text.trim() ?? price;
-          availability = document.querySelector('._16FRp0')?.text.trim() ?? "Available";
-          imageUrl = document.querySelector('._396cs4')?.attributes['src'];
-        }
-        // Myntra specific extraction
-        else if (domain.contains('myntra.com')) {
-          title = document.querySelector('.pdp-title')?.text.trim() ?? title;
-          price = document.querySelector('.pdp-price')?.text.trim() ?? price;
-          availability = document.querySelector('.size-buttons-unified-size') != null 
-              ? "Available" 
-              : "Out of Stock";
-          imageUrl = document.querySelector('.image-grid-image')?.attributes['src'];
-        }
-        // Ajio specific extraction
-        else if (domain.contains('ajio.com')) {
-          title = document.querySelector('.prod-name')?.text.trim() ?? title;
-          price = document.querySelector('.prod-sp')?.text.trim() ?? price;
-          availability = document.querySelector('.edd-pincode-msg-details')?.text.trim() ?? "Available";
-          imageUrl = document.querySelector('.img-container img')?.attributes['src'];
-        }
-        // Generic extraction as fallback
-        else {
-          title = document.querySelector('h1')?.text.trim() ?? title;
-          price = document.querySelector('[itemprop="price"]')?.text.trim() ?? price;
-          availability = document.querySelector('[itemprop="availability"]')?.text.trim() ?? availability;
-          imageUrl = document.querySelector('img[itemprop="image"]')?.attributes['src'];
-        }
-
-        isAvailable = !availability.toLowerCase().contains('out of stock') && 
-                     !availability.toLowerCase().contains('unavailable') &&
-                     !availability.toLowerCase().contains('sold out');
-
-        return Product(
-          id: url.hashCode.toString(),
-          url: url,
-          title: title,
-          price: price,
-          availability: availability,
-          lastChecked: DateTime.now(),
-          isAvailable: isAvailable,
-          trackAvailability: true,
-          trackPrice: false,
-          initialPrice: price,
-          imageUrl: imageUrl,
-          currency: currency,
-          domain: domain,
-        );
-      } else {
-        if (response.statusCode == 401) {
-          throw Exception('Invalid API key');
-        } else if (response.statusCode == 429) {
-          throw Exception('Rate limit exceeded');
-        } else {
-          throw Exception('HTTP ${response.statusCode}: ${response.body}');
-        }
+        return null;
       }
-    } catch (e) {
-      print('Error checking product: $e');
-      throw e;
+
+      // Extract title
+      title = document.querySelector('h1')?.text.trim() ?? 
+             document.querySelector('#productTitle')?.text.trim() ??
+             document.querySelector('.B_NuCI')?.text.trim() ??
+             document.querySelector('.pdp-title')?.text.trim() ??
+             document.querySelector('.prod-name')?.text.trim() ??
+             title;
+
+      // Extract price using our enhanced function
+      price = extractPrice() ?? price;
+
+      // Extract availability
+      availability = document.querySelector('#availability')?.text.trim() ??
+                   document.querySelector('._16FRp0')?.text.trim() ??
+                   (document.querySelector('.size-buttons-unified-size') != null 
+                       ? "Available" : "Out of Stock") ??
+                   document.querySelector('.edd-pincode-msg-details')?.text.trim() ??
+                   availability;
+
+      // Extract image URL
+      imageUrl = document.querySelector('#landingImage')?.attributes['src'] ??
+                document.querySelector('._396cs4')?.attributes['src'] ??
+                document.querySelector('.image-grid-image')?.attributes['src'] ??
+                document.querySelector('.img-container img')?.attributes['src'] ??
+                document.querySelector('img[itemprop="image"]')?.attributes['src'];
+
+      // Determine currency based on domain or price format
+      if (domain.contains('.in') || 
+          price.contains('₹') || 
+          url.contains('amazon.in') || 
+          url.contains('flipkart.com')) {
+        currency = '₹';
+      } else if (price.contains('\$')) {
+        currency = '\$';
+      } else if (price.contains('€')) {
+        currency = '€';
+      } else if (price.contains('£')) {
+        currency = '£';
+      }
+
+      // Determine availability
+      isAvailable = !availability.toLowerCase().contains('out of stock') && 
+                   !availability.toLowerCase().contains('unavailable') &&
+                   !availability.toLowerCase().contains('sold out') &&
+                   !availability.toLowerCase().contains('currently unavailable');
+
+      return Product(
+        id: url.hashCode.toString(),
+        url: url,
+        title: title,
+        price: price,
+        availability: availability,
+        lastChecked: DateTime.now(),
+        isAvailable: isAvailable,
+        trackAvailability: true,
+        trackPrice: false,
+        initialPrice: price,
+        imageUrl: imageUrl,
+        currency: currency,
+        domain: domain,
+      );
+    } else {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
     }
+  } catch (e) {
+    print('Error checking product: $e');
+    return null;
   }
+}
 
   void startMonitoring() {
     if (scraperApiKey.isEmpty) {
@@ -1061,7 +1097,7 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> with SingleTick
                   Row(
                     children: [
                       Text(
-                        '${product.currency}${product.price}',
+                        '${product.currency}${_formatPrice(product.price)}',
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -1160,314 +1196,45 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> with SingleTick
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'NK',
-                style: TextStyle(
-                  color: Color(0xFF6B46C1),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            Text('Product Tracker'),
-          ],
-        ),
+  String _formatPrice(String price) {
+    try {
+      // Remove all non-numeric characters except decimal point
+      String cleaned = price.replaceAll(RegExp(r'[^0-9.]'), '');
+      double value = double.parse(cleaned);
+      return value.toStringAsFixed(2);
+    } catch (e) {
+      return price; // Return original if parsing fails
+    }
+  }
+
+  void _confirmDeleteProduct(int index) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Product'),
+        content: Text('Are you sure you want to remove this product from your tracking list?'),
         actions: [
-          IconButton(
-            icon: badges.Badge(
-              showBadge: products.any((p) => !p.isAvailable && p.trackAvailability),
-              badgeStyle: badges.BadgeStyle(
-                badgeColor: Colors.red,
-              ),
-              child: Icon(Icons.notifications_active),
-            ),
-            onPressed: isLoading ? null : () async {
-              await checkAllProducts();
-            },
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
-          IconButton(
-            icon: Icon(Icons.settings),
-            onPressed: () => _showSettingsDialog(),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              Container(
-                margin: EdgeInsets.all(16),
-                padding: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF6B46C1), Color(0xFF9F7AEA)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+          TextButton(
+            onPressed: () {
+              removeProduct(products[index].id);
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Product removed'),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.purple.withOpacity(0.2),
-                      blurRadius: 10,
-                      offset: Offset(0, 5),
-                    ),
-                  ],
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Product Tracker',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white),
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                isMonitoring 
-                                    ? 'Active - Checking every $checkInterval min' 
-                                    : 'Monitoring is stopped',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.9),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ElevatedButton(
-                          onPressed: isMonitoring ? stopMonitoring : startMonitoring,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Color(0xFF6B46C1),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(isMonitoring ? Icons.stop : Icons.play_arrow, size: 20),
-                              SizedBox(width: 4),
-                              Text(isMonitoring ? 'Stop' : 'Start'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (backgroundMonitoring) ...[
-                      SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(Icons.cloud_sync, size: 16, color: Colors.white),
-                          SizedBox(width: 4),
-                          Text(
-                            'Background monitoring enabled',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (isLoading)
-                LinearProgressIndicator(
-                  minHeight: 2,
-                  backgroundColor: Colors.transparent,
-                  color: Color(0xFF6B46C1),
-                ),
-              Expanded(
-                child: products.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Lottie.asset(
-                              'assets/shopping.json',
-                              width: 200,
-                              height: 200,
-                              fit: BoxFit.contain,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              'No products added yet',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.grey),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Tap the + button to add a product',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () async {
-                          await checkAllProducts();
-                        },
-                        color: Color(0xFF6B46C1),
-                        child: ListView.builder(
-                          physics: AlwaysScrollableScrollPhysics(),
-                          itemCount: products.length,
-                          itemBuilder: (context, index) {
-                            final product = products[index];
-                            return GestureDetector(
-                              onTap: () => _showProductDetails(index),
-                              child: AnimatedContainer(
-                                duration: Duration(milliseconds: 300),
-                                margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                child: Card(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(12),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 80,
-                                          height: 80,
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(8),
-                                            color: Colors.grey[100],
-                                          ),
-                                          child: product.imageUrl != null
-                                              ? ClipRRect(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  child: Image.network(
-                                                    product.imageUrl!,
-                                                    fit: BoxFit.contain,
-                                                    loadingBuilder: (context, child, loadingProgress) {
-                                                      if (loadingProgress == null) return child;
-                                                      return Center(
-                                                        child: CircularProgressIndicator(
-                                                          value: loadingProgress.expectedTotalBytes != null
-                                                              ? loadingProgress.cumulativeBytesLoaded / 
-                                                                loadingProgress.expectedTotalBytes!
-                                                              : null,
-                                                        ),
-                                                      );
-                                                    },
-                                                    errorBuilder: (context, error, stackTrace) => Icon(
-                                                      Icons.shopping_bag,
-                                                      size: 40,
-                                                      color: Colors.grey,
-                                                    ),
-                                                  ),
-                                                )
-                                              : Center(
-                                                  child: Icon(
-                                                    Icons.shopping_bag,
-                                                    size: 40,
-                                                    color: Colors.grey,
-                                                  ),
-                                                ),
-                                        ),
-                                        SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                product.title,
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold),
-                                              ),
-                                              SizedBox(height: 4),
-                                              Text(
-                                                '${product.currency}${product.price}',
-                                                style: TextStyle(
-                                                  color: Color(0xFF6B46C1),
-                                                  fontWeight: FontWeight.bold),
-                                              ),
-                                              SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: product.isAvailable 
-                                                          ? Colors.green.withOpacity(0.1) 
-                                                          : Colors.red.withOpacity(0.1),
-                                                      borderRadius: BorderRadius.circular(4),
-                                                    ),
-                                                    child: Text(
-                                                      product.isAvailable ? 'In Stock' : 'Out of Stock',
-                                                      style: TextStyle(
-                                                        color: product.isAvailable ? Colors.green : Colors.red,
-                                                        fontSize: 12),
-                                                    ),
-                                                  ),
-                                                  Spacer(),
-                                                  Text(
-                                                    DateFormat('HH:mm').format(product.lastChecked),
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      color: Colors.grey),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-              ),
-            ],
+              );
+            },
+            child: Text('Remove', style: TextStyle(color: Colors.red)),
           ),
-          if (_showConfetti)
-            Align(
-              alignment: Alignment.topCenter,
-              child: ConfettiWidget(
-                confettiController: _confettiController,
-                blastDirectionality: BlastDirectionality.explosive,
-                shouldLoop: false,
-                colors: const [
-                  Colors.green,
-                  Colors.blue,
-                  Colors.pink,
-                  Colors.orange,
-                  Colors.purple
-                ],
-              ),
-            ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddProductDialog,
-        child: Icon(Icons.add),
-        tooltip: 'Add Product',
       ),
     );
   }
@@ -1676,6 +1443,368 @@ class _ProductMonitorHomeState extends State<ProductMonitorHome> with SingleTick
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'NK',
+                style: TextStyle(
+                  color: Color(0xFF6B46C1),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            SizedBox(width: 8),
+            Text('Product Tracker'),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: badges.Badge(
+              showBadge: products.any((p) => !p.isAvailable && p.trackAvailability),
+              badgeStyle: badges.BadgeStyle(
+                badgeColor: Colors.red,
+              ),
+              child: Icon(Icons.notifications_active),
+            ),
+            onPressed: isLoading ? null : () async {
+              await checkAllProducts();
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () => _showSettingsDialog(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              Container(
+                margin: EdgeInsets.all(16),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF6B46C1), Color(0xFF9F7AEA)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.purple.withOpacity(0.2),
+                      blurRadius: 10,
+                      offset: Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Product Tracker',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                isMonitoring 
+                                    ? 'Active - Checking every $checkInterval min' 
+                                    : 'Monitoring is stopped',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: isMonitoring ? stopMonitoring : startMonitoring,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Color(0xFF6B46C1),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(isMonitoring ? Icons.stop : Icons.play_arrow, size: 20),
+                              SizedBox(width: 4),
+                              Text(isMonitoring ? 'Stop' : 'Start'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (backgroundMonitoring) ...[
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.cloud_sync, size: 16, color: Colors.white),
+                          SizedBox(width: 4),
+                          Text(
+                            'Background monitoring enabled',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (isLoading)
+                LinearProgressIndicator(
+                  minHeight: 2,
+                  backgroundColor: Colors.transparent,
+                  color: Color(0xFF6B46C1),
+                ),
+              Expanded(
+                child: products.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Lottie.asset(
+                              'assets/shopping.json',
+                              width: 200,
+                              height: 200,
+                              fit: BoxFit.contain,
+                            ),
+                            SizedBox(height: 16),
+                            Text(
+                              'No products added yet',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Tap the + button to add a product',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () async {
+                          await checkAllProducts();
+                        },
+                        color: Color(0xFF6B46C1),
+                        child: ListView.builder(
+                          physics: AlwaysScrollableScrollPhysics(),
+                          itemCount: products.length,
+                          itemBuilder: (context, index) {
+                            final product = products[index];
+                            return Dismissible(
+                              key: Key(product.id),
+                              background: Container(
+                                color: Colors.red,
+                                alignment: Alignment.centerRight,
+                                padding: EdgeInsets.only(right: 20),
+                                child: Icon(Icons.delete, color: Colors.white),
+                              ),
+                              confirmDismiss: (direction) async {
+                                return await showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: Text('Remove Product'),
+                                    content: Text('Are you sure you want to remove this product from your tracking list?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(false),
+                                        child: Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(true),
+                                        child: Text('Remove', style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                              onDismissed: (direction) {
+                                removeProduct(product.id);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Product removed'),
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: GestureDetector(
+                                onTap: () => _showProductDetails(index),
+                                child: AnimatedContainer(
+                                  duration: Duration(milliseconds: 300),
+                                  margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  child: Card(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 80,
+                                            height: 80,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(8),
+                                              color: Colors.grey[100],
+                                            ),
+                                            child: product.imageUrl != null
+                                                ? ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.network(
+                                                      product.imageUrl!,
+                                                      fit: BoxFit.contain,
+                                                      loadingBuilder: (context, child, loadingProgress) {
+                                                        if (loadingProgress == null) return child;
+                                                        return Center(
+                                                          child: CircularProgressIndicator(
+                                                            value: loadingProgress.expectedTotalBytes != null
+                                                                ? loadingProgress.cumulativeBytesLoaded / 
+                                                                  loadingProgress.expectedTotalBytes!
+                                                                : null,
+                                                          ),
+                                                        );
+                                                      },
+                                                      errorBuilder: (context, error, stackTrace) => Icon(
+                                                        Icons.shopping_bag,
+                                                        size: 40,
+                                                        color: Colors.grey,
+                                                      ),
+                                                    ),
+                                                  )
+                                                : Center(
+                                                    child: Icon(
+                                                      Icons.shopping_bag,
+                                                      size: 40,
+                                                      color: Colors.grey,
+                                                    ),
+                                                  ),
+                                          ),
+                                          SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        product.title,
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(Icons.delete, color: Colors.grey),
+                                                      onPressed: () => _confirmDeleteProduct(index),
+                                                    ),
+                                                  ],
+                                                ),
+                                                SizedBox(height: 4),
+                                                Text(
+                                                  '${product.currency}${_formatPrice(product.price)}',
+                                                  style: TextStyle(
+                                                    color: Color(0xFF6B46C1),
+                                                    fontWeight: FontWeight.bold),
+                                                ),
+                                                SizedBox(height: 4),
+                                                Row(
+                                                  children: [
+                                                    Container(
+                                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: product.isAvailable 
+                                                            ? Colors.green.withOpacity(0.1) 
+                                                            : Colors.red.withOpacity(0.1),
+                                                        borderRadius: BorderRadius.circular(4),
+                                                      ),
+                                                      child: Text(
+                                                        product.isAvailable ? 'In Stock' : 'Out of Stock',
+                                                        style: TextStyle(
+                                                          color: product.isAvailable ? Colors.green : Colors.red,
+                                                          fontSize: 12),
+                                                      ),
+                                                    ),
+                                                    Spacer(),
+                                                    Text(
+                                                      DateFormat('HH:mm').format(product.lastChecked),
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors.grey),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+          if (_showConfetti)
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConfettiWidget(
+                confettiController: _confettiController,
+                blastDirectionality: BlastDirectionality.explosive,
+                shouldLoop: false,
+                colors: const [
+                  Colors.green,
+                  Colors.blue,
+                  Colors.pink,
+                  Colors.orange,
+                  Colors.purple
+                ],
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddProductDialog,
+        child: Icon(Icons.add),
+        tooltip: 'Add Product',
+      ),
+    );
+  }
 }
 
 @pragma('vm:entry-point')
@@ -1839,13 +1968,22 @@ Future<Product?> _checkProductInBackground(String url, String apiKey) async {
       // Amazon specific extraction
       if (domain.contains('amazon.')) {
         title = document.querySelector('#productTitle')?.text.trim() ?? title;
-        price = document.querySelector('.a-price-whole')?.text.trim() ?? price;
+        price = document.querySelector('.a-price-whole')?.text.trim() ?? 
+                document.querySelector('.priceToPay span')?.text.trim() ??
+                document.querySelector('.a-offscreen')?.text.trim() ??
+                price;
+        // Clean price string
+        price = price.replaceAll(RegExp(r'[^0-9.]'), '');
         availability = document.querySelector('#availability')?.text.trim() ?? availability;
       } 
       // Flipkart specific extraction
       else if (domain.contains('flipkart.com')) {
         title = document.querySelector('.B_NuCI')?.text.trim() ?? title;
-        price = document.querySelector('._30jeq3')?.text.trim() ?? price;
+        price = document.querySelector('._30jeq3')?.text.trim() ?? 
+                document.querySelector('._16Jk6d')?.text.trim() ??
+                price;
+        // Clean price string
+        price = price.replaceAll(RegExp(r'[^0-9.]'), '');
         availability = document.querySelector('._16FRp0')?.text.trim() ?? "Available";
       }
       // Generic extraction as fallback
